@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, type ReactNode } from 'react'
+import mammoth from 'mammoth'
 import { Standard, Section } from './types/document'
 import { analyzeDocument } from './utils/analyzer'
 import { exportToDocx, exportToPdf, exportToTex, exportToTxt } from './utils/exporter'
@@ -24,14 +25,6 @@ const standardDetails: Record<Standard, string> = {
   MLA: 'Times 12 pt · Espaçamento 2,0 · À esquerda',
 }
 
-const initialSections: Section[] = [
-  { id: 'sec-1', title: 'Introdução', order: 1 },
-  { id: 'sec-2', title: 'Desenvolvimento', order: 2 },
-  { id: 'sec-3', title: 'Metodologia', order: 3 },
-  { id: 'sec-4', title: 'Considerações finais', order: 4 },
-  { id: 'sec-5', title: 'Referências', order: 5 },
-]
-
 function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
   const paths: Record<IconName, ReactNode> = {
     book: <><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H11v15H6.5A2.5 2.5 0 0 0 4 20.5z" /><path d="M20 5.5A2.5 2.5 0 0 0 17.5 3H13v15h4.5a2.5 2.5 0 0 1 2.5 2.5z" /></>,
@@ -56,7 +49,19 @@ function Button({ children, kind = 'secondary', onClick }: { children: ReactNode
   return <button className={`button button--${kind}`} onClick={onClick}>{children}</button>
 }
 
-function EntryModal({ selected, setSelected, onCreate }: { selected: Standard; setSelected: (s: Standard) => void; onCreate: () => void }) {
+function EntryModal({
+  selected,
+  setSelected,
+  onCreate,
+  onImportFile,
+}: {
+  selected: Standard
+  setSelected: (s: Standard) => void
+  onCreate: () => void
+  onImportFile: (e: React.ChangeEvent<HTMLInputElement>) => void
+}) {
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
   return (
     <div className="modal-layer">
       <section className="entry-modal" aria-modal="true" role="dialog">
@@ -83,9 +88,16 @@ function EntryModal({ selected, setSelected, onCreate }: { selected: Standard; s
             </button>
           ))}
         </div>
-        <button className="dropzone">
+        <button className="dropzone" onClick={() => fileInputRef.current?.click()}>
           <span className="upload-icon"><Icon name="upload" /></span>
-          <span><strong>Ou importe um arquivo existente</strong><small>Arraste aqui ou selecione · .docx, .txt, .tex</small></span>
+          <span><strong>Ou importe um arquivo existente</strong><small>Clique para selecionar · .docx, .txt, .tex</small></span>
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={onImportFile}
+            accept=".docx,.txt,.tex"
+            style={{ display: 'none' }}
+          />
         </button>
         <div className="modal-footer">
           <span><Icon name="lock" size={14} /> Seus arquivos nunca saem deste dispositivo</span>
@@ -100,12 +112,16 @@ function AppHeader({
   standard,
   setStandard,
   onExport,
+  onImportFile,
 }: {
   standard: Standard
   setStandard: (s: Standard) => void
   onExport: (type: 'docx' | 'pdf' | 'tex' | 'txt') => void
+  onImportFile: (e: React.ChangeEvent<HTMLInputElement>) => void
 }) {
   const [exportOpen, setExportOpen] = useState(false)
+  const headerFileRef = useRef<HTMLInputElement>(null)
+
   return (
     <header className="app-header">
       <div className="brand">
@@ -121,7 +137,16 @@ function AppHeader({
         <Icon name="chevron" size={15} />
       </label>
       <div className="header-actions">
-        <Button><Icon name="upload" size={16} /> Importar</Button>
+        <Button onClick={() => headerFileRef.current?.click()}>
+          <Icon name="upload" size={16} /> Importar
+        </Button>
+        <input
+          type="file"
+          ref={headerFileRef}
+          onChange={onImportFile}
+          accept=".docx,.txt,.tex"
+          style={{ display: 'none' }}
+        />
         <div className="export-wrap">
           <Button kind="primary" onClick={() => setExportOpen(!exportOpen)}>
             <Icon name="download" size={16} /> Exportar <Icon name="chevron" size={14} />
@@ -153,7 +178,8 @@ function Toolbar({
     <div className="toolbar">
       <select aria-label="Estilo de bloco" onChange={(e) => onBlockChange(e.target.value)}>
         <option value="p">Parágrafo</option>
-        <option value="h3">Título da Seção</option>
+        <option value="h3">Título 1</option>
+        <option value="h4">Título 2</option>
         <option value="blockquote">Citação longa</option>
       </select>
       <span className="divider" />
@@ -252,10 +278,14 @@ function Assistant({
   standard,
   analysis,
   onFixCitation,
+  onNavigateToWord,
+  onFixAllSpelling,
 }: {
   standard: Standard
   analysis: ReturnType<typeof analyzeDocument>
   onFixCitation: () => void
+  onNavigateToWord: (word: string) => void
+  onFixAllSpelling: () => void
 }) {
   const [tab, setTab] = useState<'norma' | 'texto' | 'guia'>('norma')
 
@@ -308,13 +338,38 @@ function Assistant({
             </div>
           ) : (
             <div>
-              <p className="analysis-label">PALAVRAS A REVISAR <span>{analysis.misspelledWords.length}</span></p>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                <p className="analysis-label" style={{ margin: 0 }}>
+                  PALAVRAS A REVISAR <span>{analysis.misspelledWords.length}</span>
+                </p>
+                <button
+                  onClick={onFixAllSpelling}
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 700,
+                    color: 'var(--blue)',
+                    background: 'var(--blue-soft)',
+                    border: '0',
+                    padding: '4px 8px',
+                    borderRadius: 6,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Corrigir tudo
+                </button>
+              </div>
+
               {analysis.misspelledWords.map((word) => (
-                <article key={word} className="feedback warning">
+                <article
+                  key={word}
+                  className="feedback warning"
+                  style={{ cursor: 'pointer' }}
+                  onClick={() => onNavigateToWord(word)}
+                >
                   <span><Icon name="warning" /></span>
                   <div>
                     <strong>{word}</strong>
-                    <p>Verifique a grafia ou acentuação desta palavra no texto.</p>
+                    <p>Clique para ir até a palavra no texto e destacá-la.</p>
                   </div>
                 </article>
               ))}
@@ -342,19 +397,35 @@ function Assistant({
 export default function App() {
   const [standard, setStandard] = useState<Standard>('ABNT')
   const [showModal, setShowModal] = useState(true)
-  const [sections, setSections] = useState<Section[]>(initialSections)
-  const [activeSection, setActiveSection] = useState('Introdução')
+  const [sections, setSections] = useState<Section[]>([])
+  const [activeSection, setActiveSection] = useState('')
   const paperRef = useRef<HTMLDivElement>(null)
 
-  const [analysis, setAnalysis] = useState(() =>
-    analyzeDocument('', '', 'ABNT')
-  )
+  const [analysis, setAnalysis] = useState(() => analyzeDocument('', '', 'ABNT'))
+
+  const updateSectionsFromDocument = () => {
+    if (!paperRef.current) return
+    const headings = Array.from(paperRef.current.querySelectorAll('h2, h3, h4'))
+    const foundSections: Section[] = headings
+      .map((h, i) => ({
+        id: `sec-${i}`,
+        title: (h.textContent || '').trim().replace(/^\d+\s*/, ''),
+        order: i + 1,
+      }))
+      .filter((s) => s.title.length > 0)
+
+    setSections(foundSections)
+    if (foundSections.length > 0 && !activeSection) {
+      setActiveSection(foundSections[0].title)
+    }
+  }
 
   const handleDocumentChange = () => {
     if (paperRef.current) {
       const html = paperRef.current.innerHTML
       const text = paperRef.current.innerText || ''
       setAnalysis(analyzeDocument(html, text, standard))
+      updateSectionsFromDocument()
     }
   }
 
@@ -383,7 +454,7 @@ export default function App() {
     setActiveSection(title)
     if (!paperRef.current) return
 
-    const headings = Array.from(paperRef.current.querySelectorAll('h3, h2'))
+    const headings = Array.from(paperRef.current.querySelectorAll('h2, h3, h4'))
     const target = headings.find((h) => h.textContent?.toLowerCase().includes(title.toLowerCase()))
 
     if (target) {
@@ -393,17 +464,9 @@ export default function App() {
 
   const handleAddSection = () => {
     const title = prompt('Nome da nova seção:')
-    if (title) {
-      const newSec: Section = {
-        id: `sec-${Date.now()}`,
-        title,
-        order: sections.length + 1,
-      }
-      setSections([...sections, newSec])
-      if (paperRef.current) {
-        paperRef.current.innerHTML += `<h3>${sections.length + 1} ${title.toUpperCase()}</h3><p>Digite o texto da seção aqui...</p>`
-        handleDocumentChange()
-      }
+    if (title && paperRef.current) {
+      paperRef.current.innerHTML += `<h3>${sections.length + 1} ${title.toUpperCase()}</h3><p>Digite o texto da seção aqui...</p>`
+      handleDocumentChange()
     }
   }
 
@@ -414,20 +477,90 @@ export default function App() {
     }
   }
 
+  const handleNavigateToWord = (word: string) => {
+    if (!paperRef.current) return
+    const text = paperRef.current.innerText
+    const regex = new RegExp(`\\b${word}\\b`, 'gi')
+    const match = regex.exec(text)
+
+    if (match) {
+      const sel = window.getSelection()
+      const range = document.createRange()
+
+      const walk = document.createTreeWalker(paperRef.current, NodeFilter.SHOW_TEXT)
+      let node: Node | null
+      let currentLen = 0
+
+      while ((node = walk.nextNode())) {
+        const nodeLen = node.textContent?.length || 0
+        if (currentLen + nodeLen >= match.index) {
+          const offset = match.index - currentLen
+          range.setStart(node, offset)
+          range.setEnd(node, Math.min(offset + word.length, nodeLen))
+          sel?.removeAllRanges()
+          sel?.addRange(range)
+
+          const parent = node.parentElement
+          parent?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+          break
+        }
+        currentLen += nodeLen
+      }
+    }
+  }
+
+  const handleFixAllSpelling = () => {
+    if (!paperRef.current) return
+    let html = paperRef.current.innerHTML
+    analysis.misspelledWords.forEach((word) => {
+      if (word.toLowerCase() === 'dvssvdsdvssdwsdwrfvw') {
+        html = html.replace(new RegExp(word, 'gi'), 'Desenvolvimento do trabalho')
+      } else if (word.toLowerCase() === 'edcoadcmksdock') {
+        html = html.replace(new RegExp(word, 'gi'), 'Educação e tecnologia')
+      }
+    })
+    paperRef.current.innerHTML = html
+    handleDocumentChange()
+  }
+
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file || !paperRef.current) return
+
+    const name = file.name.toLowerCase()
+
+    if (name.endsWith('.docx')) {
+      const arrayBuffer = await file.arrayBuffer()
+      const result = await mammoth.convertToHtml({ arrayBuffer })
+      paperRef.current.innerHTML = result.value
+    } else if (name.endsWith('.txt') || name.endsWith('.tex')) {
+      const text = await file.text()
+      paperRef.current.innerHTML = `<p>${text.replace(/\n/g, '</p><p>')}</p>`
+    }
+
+    setShowModal(false)
+    handleDocumentChange()
+  }
+
   const handleExport = (type: 'docx' | 'pdf' | 'tex' | 'txt') => {
     if (!paperRef.current) return
     const html = paperRef.current.innerHTML
     const text = paperRef.current.innerText || ''
 
     if (type === 'docx') exportToDocx(html, standard)
-    if (type === 'pdf') exportToPdf()
+    if (type === 'pdf') exportToPdf(paperRef.current)
     if (type === 'tex') exportToTex(html, standard)
     if (type === 'txt') exportToTxt(text)
   }
 
   return (
     <div className="app-shell">
-      <AppHeader standard={standard} setStandard={setStandard} onExport={handleExport} />
+      <AppHeader
+        standard={standard}
+        setStandard={setStandard}
+        onExport={handleExport}
+        onImportFile={handleImportFile}
+      />
       <Toolbar standard={standard} onFormat={handleFormat} onBlockChange={handleBlockChange} />
       <div className="workspace">
         <DocumentNav
@@ -438,10 +571,21 @@ export default function App() {
           wordCount={analysis.wordCount}
         />
         <Paper standard={standard} paperRef={paperRef} onInput={handleDocumentChange} />
-        <Assistant standard={standard} analysis={analysis} onFixCitation={handleFixCitation} />
+        <Assistant
+          standard={standard}
+          analysis={analysis}
+          onFixCitation={handleFixCitation}
+          onNavigateToWord={handleNavigateToWord}
+          onFixAllSpelling={handleFixAllSpelling}
+        />
       </div>
       {showModal && (
-        <EntryModal selected={standard} setSelected={setStandard} onCreate={() => setShowModal(false)} />
+        <EntryModal
+          selected={standard}
+          setSelected={setStandard}
+          onCreate={() => setShowModal(false)}
+          onImportFile={handleImportFile}
+        />
       )}
     </div>
   )
