@@ -1,21 +1,12 @@
-import { useState, type ReactNode } from 'react'
+import { useState, useRef, useEffect, type ReactNode } from 'react'
+import { Standard, Section } from './types/document'
+import { analyzeDocument } from './utils/analyzer'
+import { exportToDocx, exportToPdf, exportToTex, exportToTxt } from './utils/exporter'
 
-type Standard = 'ABNT' | 'APA' | 'IEEE' | 'Vancouver' | 'MLA'
 type IconName =
-  | 'book'
-  | 'check'
-  | 'chevron'
-  | 'download'
-  | 'file'
-  | 'info'
-  | 'lock'
-  | 'more'
-  | 'plus'
-  | 'quote'
-  | 'search'
-  | 'sparkle'
-  | 'upload'
-  | 'warning'
+  | 'book' | 'check' | 'chevron' | 'download' | 'file'
+  | 'info' | 'lock' | 'more' | 'plus' | 'quote'
+  | 'search' | 'sparkle' | 'upload' | 'warning'
 
 const standards: { id: Standard; title: string; note: string }[] = [
   { id: 'ABNT', title: 'ABNT', note: 'Brasil · Acadêmico' },
@@ -32,6 +23,14 @@ const standardDetails: Record<Standard, string> = {
   Vancouver: 'Arial 12 pt · Espaçamento 1,5 · Justificado',
   MLA: 'Times 12 pt · Espaçamento 2,0 · À esquerda',
 }
+
+const initialSections: Section[] = [
+  { id: 'sec-1', title: 'Introdução', order: 1 },
+  { id: 'sec-2', title: 'Desenvolvimento', order: 2 },
+  { id: 'sec-3', title: 'Metodologia', order: 3 },
+  { id: 'sec-4', title: 'Considerações finais', order: 4 },
+  { id: 'sec-5', title: 'Referências', order: 5 },
+]
 
 function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
   const paths: Record<IconName, ReactNode> = {
@@ -97,7 +96,15 @@ function EntryModal({ selected, setSelected, onCreate }: { selected: Standard; s
   )
 }
 
-function AppHeader({ standard, setStandard }: { standard: Standard; setStandard: (s: Standard) => void }) {
+function AppHeader({
+  standard,
+  setStandard,
+  onExport,
+}: {
+  standard: Standard
+  setStandard: (s: Standard) => void
+  onExport: (type: 'docx' | 'pdf' | 'tex' | 'txt') => void
+}) {
   const [exportOpen, setExportOpen] = useState(false)
   return (
     <header className="app-header">
@@ -116,10 +123,15 @@ function AppHeader({ standard, setStandard }: { standard: Standard; setStandard:
       <div className="header-actions">
         <Button><Icon name="upload" size={16} /> Importar</Button>
         <div className="export-wrap">
-          <Button kind="primary" onClick={() => setExportOpen(!exportOpen)}><Icon name="download" size={16} /> Exportar <Icon name="chevron" size={14} /></Button>
+          <Button kind="primary" onClick={() => setExportOpen(!exportOpen)}>
+            <Icon name="download" size={16} /> Exportar <Icon name="chevron" size={14} />
+          </Button>
           {exportOpen && (
             <div className="export-menu">
-              {['.docx · Microsoft Word', '.pdf · PDF pronto', '.tex · Código LaTeX', '.txt · Texto puro'].map((item) => <button key={item}>{item}</button>)}
+              <button onClick={() => { onExport('docx'); setExportOpen(false) }}>.docx · Microsoft Word</button>
+              <button onClick={() => { onExport('pdf'); setExportOpen(false) }}>.pdf · PDF pronto</button>
+              <button onClick={() => { onExport('tex'); setExportOpen(false) }}>.tex · Código LaTeX</button>
+              <button onClick={() => { onExport('txt'); setExportOpen(false) }}>.txt · Texto puro</button>
             </div>
           )}
         </div>
@@ -128,43 +140,100 @@ function AppHeader({ standard, setStandard }: { standard: Standard; setStandard:
   )
 }
 
-function Toolbar({ standard }: { standard: Standard }) {
+function Toolbar({
+  standard,
+  onFormat,
+  onBlockChange,
+}: {
+  standard: Standard
+  onFormat: (command: string, value?: string) => void
+  onBlockChange: (tag: string) => void
+}) {
   return (
     <div className="toolbar">
-      <select aria-label="Estilo de bloco"><option>Parágrafo</option><option>Título 1</option><option>Título 2</option><option>Citação longa</option><option>Nota de rodapé</option></select>
+      <select aria-label="Estilo de bloco" onChange={(e) => onBlockChange(e.target.value)}>
+        <option value="p">Parágrafo</option>
+        <option value="h3">Título da Seção</option>
+        <option value="blockquote">Citação longa</option>
+      </select>
       <span className="divider" />
-      <button className="tool strong">B</button>
-      <button className="tool italic">I</button>
-      <button className="tool caps">AA</button>
+      <button className="tool strong" onClick={() => onFormat('bold')}>B</button>
+      <button className="tool italic" onClick={() => onFormat('italic')}>I</button>
+      <button className="tool caps" onClick={() => onFormat('uppercase')}>AA</button>
       <span className="divider" />
-      <button className="tool-label"><Icon name="quote" size={16} /> Citação</button>
-      <button className="tool-label equation">∑ <span>Equação</span></button>
-      <div className="rule-indicator"><span>{standard}</span>{standardDetails[standard]}</div>
+      <button className="tool-label" onClick={() => onBlockChange('blockquote')}>
+        <Icon name="quote" size={16} /> Citação
+      </button>
+      <button className="tool-label equation" onClick={() => onFormat('insertText', ' ∑ ')}>
+        ∑ <span>Equação</span>
+      </button>
+      <div className="rule-indicator">
+        <span>{standard}</span>{standardDetails[standard]}
+      </div>
     </div>
   )
 }
 
-function DocumentNav() {
+function DocumentNav({
+  sections,
+  activeSection,
+  onSelectSection,
+  onAddSection,
+  wordCount,
+}: {
+  sections: Section[]
+  activeSection: string
+  onSelectSection: (title: string) => void
+  onAddSection: () => void
+  wordCount: number
+}) {
   return (
     <aside className="document-nav">
-      <div className="side-title"><span>ESTRUTURA</span><button><Icon name="plus" size={15} /></button></div>
+      <div className="side-title">
+        <span>ESTRUTURA</span>
+        <button onClick={onAddSection} title="Nova Seção"><Icon name="plus" size={15} /></button>
+      </div>
       <nav>
-        <button className="active"><span>01</span> Introdução</button>
-        <button><span>02</span> Desenvolvimento</button>
-        <button><span>03</span> Metodologia</button>
-        <button><span>04</span> Considerações finais</button>
-        <button><span>05</span> Referências</button>
+        {sections.map((sec, idx) => (
+          <button
+            key={sec.id}
+            className={activeSection === sec.title ? 'active' : ''}
+            onClick={() => onSelectSection(sec.title)}
+          >
+            <span>0{idx + 1}</span> {sec.title}
+          </button>
+        ))}
       </nav>
-      <div className="page-count"><Icon name="file" size={15} /><span><strong>1 página</strong> · 246 palavras</span></div>
+      <div className="page-count">
+        <Icon name="file" size={15} />
+        <span><strong>1 página</strong> · {wordCount} palavras</span>
+      </div>
     </aside>
   )
 }
 
-function Paper({ standard }: { standard: Standard }) {
+function Paper({
+  standard,
+  paperRef,
+  onInput,
+}: {
+  standard: Standard
+  paperRef: React.RefObject<HTMLDivElement | null>
+  onInput: () => void
+}) {
   return (
     <main className="canvas">
-      <div className="canvas-top"><span>PÁGINA 1 DE 1</span><button><Icon name="more" /></button></div>
-      <article className={`paper paper--${standard.toLowerCase()}`} contentEditable suppressContentEditableWarning>
+      <div className="canvas-top">
+        <span>PÁGINA 1 DE 1</span>
+        <button><Icon name="more" /></button>
+      </div>
+      <article
+        ref={paperRef}
+        className={`paper paper--${standard.toLowerCase()}`}
+        contentEditable
+        suppressContentEditableWarning
+        onInput={onInput}
+      >
         <p className="paper-kicker">UNIVERSIDADE FEDERAL DO BRASIL</p>
         <h2>O IMPACTO DA TECNOLOGIA NA EDUCAÇÃO CONTEMPORÂNEA</h2>
         <p className="author">Marina Oliveira Santos</p>
@@ -179,26 +248,93 @@ function Paper({ standard }: { standard: Standard }) {
   )
 }
 
-function Assistant({ standard }: { standard: Standard }) {
+function Assistant({
+  standard,
+  analysis,
+  onFixCitation,
+}: {
+  standard: Standard
+  analysis: ReturnType<typeof analyzeDocument>
+  onFixCitation: () => void
+}) {
   const [tab, setTab] = useState<'norma' | 'texto' | 'guia'>('norma')
+
   return (
     <aside className="assistant">
-      <div className="assistant-heading"><div><Icon name="sparkle" /><span><strong>Assistente</strong><small>Análise em tempo real</small></span></div><span className="live-dot">Ativo</span></div>
+      <div className="assistant-heading">
+        <div>
+          <Icon name="sparkle" />
+          <span><strong>Assistente</strong><small>Análise em tempo real</small></span>
+        </div>
+        <span className="live-dot">Ativo</span>
+      </div>
       <div className="tabs">
         <button className={tab === 'norma' ? 'active' : ''} onClick={() => setTab('norma')}>Norma</button>
         <button className={tab === 'texto' ? 'active' : ''} onClick={() => setTab('texto')}>Ortografia</button>
         <button className={tab === 'guia' ? 'active' : ''} onClick={() => setTab('guia')}>Guia</button>
       </div>
-      {tab === 'norma' && <div className="feedback-list">
-        <p className="analysis-label">CONFORMIDADE {standard}<span>2 de 3</span></p>
-        <div className="progress"><i /></div>
-        <article className="feedback success"><span><Icon name="check" /></span><div><strong>Formatação correta</strong><p>Margens, fonte e espaçamento estão de acordo com a norma.</p></div></article>
-        <article className="feedback warning"><span><Icon name="warning" /></span><div><strong>Ano ausente na citação</strong><p>A citação no 3º parágrafo precisa incluir o ano da obra.</p><button>Corrigir para (SILVA, 2024)</button></div></article>
-        <article className="feedback tip"><span><Icon name="info" /></span><div><strong>Dica {standard}</strong><p>Títulos de seções não levam ponto final e devem usar numeração progressiva.</p></div></article>
-      </div>}
-      {tab === 'texto' && <div className="empty-state"><Icon name="check" size={24} /><strong>Texto revisado</strong><p>Nenhum erro ortográfico encontrado nesta página.</p></div>}
-      {tab === 'guia' && <div className="guide"><p>CONSULTA RÁPIDA</p>{['Como citar um livro', 'Como citar um site', 'Figuras e tabelas', 'Lista de referências'].map(item => <button key={item}>{item}<span>→</span></button>)}</div>}
-      <div className="assistant-footer"><Icon name="sparkle" size={15} /> Revisado há poucos segundos</div>
+
+      {tab === 'norma' && (
+        <div className="feedback-list">
+          <p className="analysis-label">
+            CONFORMIDADE {standard}
+            <span>{analysis.complianceScore} de {analysis.totalRules}</span>
+          </p>
+          <div className="progress">
+            <i style={{ width: `${(analysis.complianceScore / analysis.totalRules) * 100}%` }} />
+          </div>
+          {analysis.feedbacks.map((item) => (
+            <article key={item.id} className={`feedback ${item.type}`}>
+              <span>
+                <Icon name={item.type === 'success' ? 'check' : item.type === 'warning' ? 'warning' : 'info'} />
+              </span>
+              <div>
+                <strong>{item.title}</strong>
+                <p>{item.message}</p>
+                {item.actionLabel && <button onClick={onFixCitation}>{item.actionLabel}</button>}
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+
+      {tab === 'texto' && (
+        <div className="feedback-list">
+          {analysis.misspelledWords.length === 0 ? (
+            <div className="empty-state">
+              <Icon name="check" size={24} />
+              <strong>Texto revisado</strong>
+              <p>Nenhum erro ortográfico encontrado nesta página.</p>
+            </div>
+          ) : (
+            <div>
+              <p className="analysis-label">PALAVRAS A REVISAR <span>{analysis.misspelledWords.length}</span></p>
+              {analysis.misspelledWords.map((word) => (
+                <article key={word} className="feedback warning">
+                  <span><Icon name="warning" /></span>
+                  <div>
+                    <strong>{word}</strong>
+                    <p>Verifique a grafia ou acentuação desta palavra no texto.</p>
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {tab === 'guia' && (
+        <div className="guide">
+          <p>CONSULTA RÁPIDA</p>
+          {['Como citar um livro', 'Como citar um site', 'Figuras e tabelas', 'Lista de referências'].map((item) => (
+            <button key={item}>{item}<span>→</span></button>
+          ))}
+        </div>
+      )}
+
+      <div className="assistant-footer">
+        <Icon name="sparkle" size={15} /> Revisado em tempo real
+      </div>
     </aside>
   )
 }
@@ -206,16 +342,107 @@ function Assistant({ standard }: { standard: Standard }) {
 export default function App() {
   const [standard, setStandard] = useState<Standard>('ABNT')
   const [showModal, setShowModal] = useState(true)
+  const [sections, setSections] = useState<Section[]>(initialSections)
+  const [activeSection, setActiveSection] = useState('Introdução')
+  const paperRef = useRef<HTMLDivElement>(null)
+
+  const [analysis, setAnalysis] = useState(() =>
+    analyzeDocument('', '', 'ABNT')
+  )
+
+  const handleDocumentChange = () => {
+    if (paperRef.current) {
+      const html = paperRef.current.innerHTML
+      const text = paperRef.current.innerText || ''
+      setAnalysis(analyzeDocument(html, text, standard))
+    }
+  }
+
+  useEffect(() => {
+    handleDocumentChange()
+  }, [standard])
+
+  const handleFormat = (command: string, value: string | undefined = undefined) => {
+    if (command === 'uppercase') {
+      const sel = window.getSelection()
+      if (sel && sel.toString()) {
+        document.execCommand('insertText', false, sel.toString().toUpperCase())
+      }
+    } else {
+      document.execCommand(command, false, value)
+    }
+    handleDocumentChange()
+  }
+
+  const handleBlockChange = (tag: string) => {
+    document.execCommand('formatBlock', false, `<${tag}>`)
+    handleDocumentChange()
+  }
+
+  const handleSelectSection = (title: string) => {
+    setActiveSection(title)
+    if (!paperRef.current) return
+
+    const headings = Array.from(paperRef.current.querySelectorAll('h3, h2'))
+    const target = headings.find((h) => h.textContent?.toLowerCase().includes(title.toLowerCase()))
+
+    if (target) {
+      target.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }
+  }
+
+  const handleAddSection = () => {
+    const title = prompt('Nome da nova seção:')
+    if (title) {
+      const newSec: Section = {
+        id: `sec-${Date.now()}`,
+        title,
+        order: sections.length + 1,
+      }
+      setSections([...sections, newSec])
+      if (paperRef.current) {
+        paperRef.current.innerHTML += `<h3>${sections.length + 1} ${title.toUpperCase()}</h3><p>Digite o texto da seção aqui...</p>`
+        handleDocumentChange()
+      }
+    }
+  }
+
+  const handleFixCitation = () => {
+    if (paperRef.current) {
+      paperRef.current.innerHTML = paperRef.current.innerHTML.replace('(SILVA)', '(SILVA, 2024)')
+      handleDocumentChange()
+    }
+  }
+
+  const handleExport = (type: 'docx' | 'pdf' | 'tex' | 'txt') => {
+    if (!paperRef.current) return
+    const html = paperRef.current.innerHTML
+    const text = paperRef.current.innerText || ''
+
+    if (type === 'docx') exportToDocx(html, standard)
+    if (type === 'pdf') exportToPdf()
+    if (type === 'tex') exportToTex(html, standard)
+    if (type === 'txt') exportToTxt(text)
+  }
+
   return (
     <div className="app-shell">
-      <AppHeader standard={standard} setStandard={setStandard} />
-      <Toolbar standard={standard} />
+      <AppHeader standard={standard} setStandard={setStandard} onExport={handleExport} />
+      <Toolbar standard={standard} onFormat={handleFormat} onBlockChange={handleBlockChange} />
       <div className="workspace">
-        <DocumentNav />
-        <Paper standard={standard} />
-        <Assistant standard={standard} />
+        <DocumentNav
+          sections={sections}
+          activeSection={activeSection}
+          onSelectSection={handleSelectSection}
+          onAddSection={handleAddSection}
+          wordCount={analysis.wordCount}
+        />
+        <Paper standard={standard} paperRef={paperRef} onInput={handleDocumentChange} />
+        <Assistant standard={standard} analysis={analysis} onFixCitation={handleFixCitation} />
       </div>
-      {showModal && <EntryModal selected={standard} setSelected={setStandard} onCreate={() => setShowModal(false)} />}
+      {showModal && (
+        <EntryModal selected={standard} setSelected={setStandard} onCreate={() => setShowModal(false)} />
+      )}
     </div>
   )
 }
