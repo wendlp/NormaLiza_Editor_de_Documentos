@@ -1,18 +1,14 @@
 import { saveAs } from 'file-saver'
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType } from 'docx'
+// @ts-ignore
+import html2pdf from 'html2pdf.js'
 import { Standard } from '../types/document'
 
-/**
- * Exporta o conteúdo como Texto Puro (.txt)
- */
 export function exportToTxt(textContent: string, filename = 'documento-normalizado.txt') {
   const blob = new Blob([textContent], { type: 'text/plain;charset=utf-8' })
   saveAs(blob, filename)
 }
 
-/**
- * Exporta o conteúdo formatado em código LaTeX (.tex)
- */
 export function exportToTex(htmlContent: string, standard: Standard, filename = 'documento.tex') {
   const temp = document.createElement('div')
   temp.innerHTML = htmlContent
@@ -21,7 +17,6 @@ export function exportToTex(htmlContent: string, standard: Standard, filename = 
   temp.childNodes.forEach((node) => {
     const el = node as HTMLElement
     if (!el.tagName) return
-
     const text = el.innerText || el.textContent || ''
 
     switch (el.tagName.toLowerCase()) {
@@ -65,14 +60,21 @@ ${texBody}
 }
 
 /**
- * Exporta o documento para PDF usando a caixa de diálogo nativa do navegador
+ * Exporta para PDF diretamente sem abrir caixa de impressão
  */
-export function exportToPdf() {
-  window.print()
+export function exportToPdf(element: HTMLElement, filename = 'documento-normalizado.pdf') {
+  const opt = {
+    margin: [15, 15, 15, 15],
+    filename: filename,
+    image: { type: 'jpeg', quality: 0.98 },
+    html2canvas: { scale: 2, useCORS: true },
+    jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+  }
+  html2pdf().set(opt).from(element).save()
 }
 
 /**
- * Exporta o documento formatado diretamente para Microsoft Word (.docx)
+ * Exporta para DOCX mantendo estilos fiéis da norma
  */
 export async function exportToDocx(htmlContent: string, standard: Standard, filename = 'documento-normalizado.docx') {
   const temp = document.createElement('div')
@@ -83,41 +85,42 @@ export async function exportToDocx(htmlContent: string, standard: Standard, file
   temp.childNodes.forEach((node) => {
     const el = node as HTMLElement
     if (!el.tagName) return
+    const text = (el.innerText || el.textContent || '').trim()
+    if (!text) return
 
-    const text = el.innerText || el.textContent || ''
+    const tag = el.tagName.toLowerCase()
 
-    if (el.tagName.toLowerCase() === 'h2') {
+    if (tag === 'h2') {
       docChildren.push(
         new Paragraph({
-          text: text,
-          heading: HeadingLevel.HEADING_1,
+          children: [new TextRun({ text, bold: true, size: 28, font: 'Arial' })],
           alignment: AlignmentType.CENTER,
-          spacing: { before: 400, after: 200 },
+          spacing: { before: 360, after: 180 },
         })
       )
-    } else if (el.tagName.toLowerCase() === 'h3') {
+    } else if (tag === 'h3') {
       docChildren.push(
         new Paragraph({
-          text: text,
+          children: [new TextRun({ text, bold: true, size: 24, font: 'Arial' })],
           heading: HeadingLevel.HEADING_2,
           spacing: { before: 240, after: 120 },
         })
       )
-    } else if (el.tagName.toLowerCase() === 'blockquote') {
+    } else if (tag === 'blockquote') {
       docChildren.push(
         new Paragraph({
-          children: [new TextRun({ text, italic: true, size: 20 })],
-          indent: { left: 1440 }, // Recuo de 4cm
-          spacing: { before: 120, after: 120 },
+          children: [new TextRun({ text, size: 20, font: 'Arial' })],
+          indent: { left: 2268 }, // 4 cm
+          spacing: { before: 120, after: 120, line: 240 },
         })
       )
-    } else if (el.tagName.toLowerCase() === 'p') {
+    } else if (tag === 'p') {
       const isCenter = el.classList.contains('paper-kicker') || el.classList.contains('author')
       docChildren.push(
         new Paragraph({
-          children: [new TextRun({ text, size: 24 })],
+          children: [new TextRun({ text, size: 24, font: 'Arial' })],
           alignment: isCenter ? AlignmentType.CENTER : AlignmentType.JUSTIFY,
-          indent: isCenter ? undefined : { firstLine: 720 }, // Recuo de parágrafo
+          indent: isCenter ? undefined : { firstLine: 720 }, // Recuo de 1,25cm
           spacing: { line: standard === 'APA' || standard === 'MLA' ? 480 : 360, after: 120 },
         })
       )
@@ -129,7 +132,7 @@ export async function exportToDocx(htmlContent: string, standard: Standard, file
       {
         properties: {
           page: {
-            margin: { top: 1700, bottom: 1134, left: 1700, right: 1134 }, // Margens ABNT (3cm topo/esq, 2cm dir/baixo)
+            margin: { top: 1700, bottom: 1134, left: 1700, right: 1134 },
           },
         },
         children: docChildren,
